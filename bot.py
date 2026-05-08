@@ -3,6 +3,22 @@ from discord.ext import commands
 import asyncio
 import json
 import os
+from flask import Flask
+from threading import Thread
+
+# ---------------- KEEP ALIVE ----------------
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
 
 # ---------------- INTENTS ----------------
 intents = discord.Intents.default()
@@ -29,7 +45,6 @@ cashout_ledger = {}
 # ---------------- SAVE FILE ----------------
 DATA_FILE = "data.json"
 
-
 # ---------------- SAVE / LOAD ----------------
 def save_data():
     data = {
@@ -41,43 +56,49 @@ def save_data():
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-
 def load_data():
     global user_wallets
     global user_balances
     global cashout_ledger
 
     if not os.path.exists(DATA_FILE):
+        save_data()
         return
 
-    with open(DATA_FILE, "r") as f:
-        data = json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
 
-    # wallets
+    except:
+        data = {
+            "wallets": {},
+            "balances": {},
+            "ledger": {}
+        }
+
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+
     user_wallets = {
         int(k): v
         for k, v in data.get("wallets", {}).items()
     }
 
-    # balances
     user_balances = {
         int(k): v
         for k, v in data.get("balances", {}).items()
     }
 
-    # ledger
     cashout_ledger = {
         int(k): v
         for k, v in data.get("ledger", {}).items()
     }
-
 
 # ---------------- LOCK SYSTEM ----------------
 def get_lock(order_id):
     if order_id not in order_locks:
         order_locks[order_id] = asyncio.Lock()
     return order_locks[order_id]
-
 
 # ---------------- MONEY ----------------
 def parse_amount(value):
@@ -91,7 +112,6 @@ def parse_amount(value):
 
     return int(value)
 
-
 def format_amount(value):
     if value >= 1_000_000_000:
         return f"{value / 1_000_000_000:.1f}b".replace(".0", "")
@@ -100,7 +120,6 @@ def format_amount(value):
         return f"{value / 1_000_000:.1f}m".replace(".0", "")
 
     return str(value)
-
 
 # ---------------- ACCEPT MODAL ----------------
 class AcceptModal(discord.ui.Modal, title="Accept Order"):
@@ -204,7 +223,6 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 ephemeral=True
             )
 
-
 # ---------------- ACCEPT BUTTON ----------------
 class AcceptView(discord.ui.View):
     def __init__(self, order_id):
@@ -244,287 +262,17 @@ class AcceptView(discord.ui.View):
             AcceptModal(self.order_id, member)
         )
 
-
-# ---------------- CASHOUT CONFIRM BUTTON ----------------
-class CashoutConfirmView(discord.ui.View):
-    def __init__(self, supplier, amount):
-        super().__init__(timeout=None)
-        self.supplier = supplier
-        self.amount = amount
-
-    @discord.ui.button(
-        label="Confirm Sent",
-        style=discord.ButtonStyle.green
-    )
-    async def confirm_sent(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        button.disabled = True
-
-        user_balances[self.supplier.id] = 0
-        cashout_ledger[self.supplier.id] = []
-
-        save_data()
-
-        try:
-            await self.supplier.send(
-                f"✅ Your cashout of ₱{self.amount:,.2f} "
-                f"has been confirmed as sent by {interaction.user.mention}."
-            )
-        except:
-            pass
-
-        await interaction.response.edit_message(view=self)
-
-        await interaction.followup.send(
-            "✅ Cashout marked as sent.",
-            ephemeral=True
-        )
-
-
-# ---------------- NEED ----------------
-@bot.command()
-async def need(ctx, amount: str, rate: str):
-    seller_role = discord.utils.get(
-        ctx.guild.roles,
-        name=SELLER_ROLE_NAME
-    )
-
-    supplier_role = discord.utils.get(
-        ctx.guild.roles,
-        name=SUPPLIER_ROLE_NAME
-    )
-
-    if not seller_role or seller_role not in ctx.author.roles:
-        await ctx.send("❌ Only Seller role can use `!need`.")
-        return
-
-    if not supplier_role:
-        await ctx.send("❌ Supplier role not found.")
-        return
-
-    order_id = str(ctx.message.id)
-    amount_value = parse_amount(amount)
-
-    active_orders[order_id] = {
-        "remaining": amount_value,
-        "original_amount": amount,
-        "rate": rate,
-        "seller": ctx.author,
-        "guild": ctx.guild
-    }
-
-    view = AcceptView(order_id)
-    sent = 0
-
-    for member in supplier_role.members:
-        if member.bot:
-            continue
-
-        try:
-            await member.send(
-                f"📢 **NEW ORDER**\n\n"
-                f"💰 Amount: {amount}\n"
-                f"💵 Rate: {rate} PHP",
-                view=view
-            )
-            sent += 1
-        except:
-            pass
-
-    await ctx.send(f"✅ Sent to {sent} suppliers.")
-
-
-# ---------------- WALLET ----------------
-@bot.command()
-async def wallet(ctx, action=None, method=None, *, value=None):
-    target = ctx.message.mentions[0] if ctx.message.mentions else None
-
-    # VIEW WALLET
-    if target:
-        wallets = user_wallets.get(target.id)
-
-        if not wallets:
-            await ctx.send(f"❌ {target.mention} has no saved wallet.")
-            return
-
-        ltc = wallets.get("ltc", "Not set")
-        gcash = wallets.get("gcash", "Not set")
-
-        await ctx.send(
-            f"💼 Wallets of {target.mention}\n"
-            f"**LTC:** {ltc}\n"
-            f"**GCash:** {gcash}"
-        )
-        return
-
-    # SET WALLET
-    if action != "set":
-        await ctx.send(
-            "Usage:\n"
-            "`!wallet set ltc ADDRESS`\n"
-            "`!wallet set gcash NUMBER`\n"
-            "`!wallet @user`"
-        )
-        return
-
-    if method not in ["ltc", "gcash"]:
-        await ctx.send("❌ Only `ltc` and `gcash` are allowed.")
-        return
-
-    if not value:
-        await ctx.send("❌ Please provide a value.")
-        return
-
-    user_wallets.setdefault(ctx.author.id, {})
-    user_wallets[ctx.author.id][method] = value
-
-    save_data()
-
-    await ctx.send(f"✅ {method.upper()} saved.")
-
-
-# ---------------- BALANCE ----------------
-@bot.command()
-async def balance(ctx):
-    target = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
-    balance_value = user_balances.get(target.id, 0)
-
-    await ctx.send(
-        f"💰 {target.mention}'s balance: ₱{balance_value:,.2f}"
-    )
-
-
-# ---------------- CONFIRM ----------------
-@bot.command()
-async def confirm(ctx):
-    order = None
-
-    for data in active_orders.values():
-        if (
-            data["seller"].id == ctx.author.id
-            and data.get("ticket_channel_id") == ctx.channel.id
-        ):
-            order = data
-            break
-
-    if not order:
-        await ctx.send("❌ No active order found in this ticket.")
-        return
-
-    supplier = order.get("last_supplier")
-    sold_amount = order.get("last_sell_amount", 0)
-
-    if not supplier:
-        await ctx.send("❌ Supplier not found.")
-        return
-
-    credited = (sold_amount / 1_000_000) * float(order["rate"])
-
-    user_balances[supplier.id] = (
-        user_balances.get(supplier.id, 0) + credited
-    )
-
-    cashout_ledger.setdefault(supplier.id, [])
-    cashout_ledger[supplier.id].append({
-        "seller_id": ctx.author.id,
-        "amount": credited
-    })
-
-    save_data()
-
-    await ctx.send(
-        f"✅ Confirmed.\n"
-        f"{supplier.mention} received ₱{credited:,.2f}"
-    )
-
-
-# ---------------- CASHOUT ----------------
-@bot.command()
-async def cashout(ctx, method=None):
-    if method is None:
-        await ctx.send(
-            "❌ Usage: `!cashout gcash` or `!cashout ltc`"
-        )
-        return
-
-    method = method.lower()
-
-    if method not in ["gcash", "ltc"]:
-        await ctx.send(
-            "❌ Only `gcash` or `ltc` are allowed."
-        )
-        return
-
-    entries = cashout_ledger.get(ctx.author.id, [])
-
-    if not entries:
-        await ctx.send("❌ You have no cashout balance.")
-        return
-
-    wallets = user_wallets.get(ctx.author.id, {})
-    wallet_value = wallets.get(method)
-
-    if not wallet_value:
-        await ctx.send(
-            f"❌ You do not have a {method.upper()} wallet set.\n"
-            f"Use `!wallet set {method} VALUE`"
-        )
-        return
-
-    grouped = {}
-
-    for entry in entries:
-        seller = ctx.guild.get_member(entry["seller_id"])
-
-        if not seller:
-            continue
-
-        if seller.id not in grouped:
-            grouped[seller.id] = {
-                "seller": seller,
-                "amount": 0
-            }
-
-        grouped[seller.id]["amount"] += entry["amount"]
-
-    sent = 0
-
-    for data in grouped.values():
-        seller = data["seller"]
-        amount = data["amount"]
-
-        try:
-            view = CashoutConfirmView(ctx.author, amount)
-
-            await seller.send(
-                f"💸 **CASHOUT REQUEST**\n\n"
-                f"Supplier: {ctx.author.mention}\n"
-                f"Amount: ₱{amount:,.2f}\n"
-                f"Method: {method.upper()}\n\n"
-                f"Wallet:\n`{wallet_value}`\n\n"
-                f"Press the button below after sending the payment.",
-                view=view
-            )
-
-            sent += 1
-
-        except:
-            pass
-
-    await ctx.send(
-        f"✅ Cashout request sent to {sent} seller(s)."
-    )
-
-
 # ---------------- READY ----------------
 @bot.event
 async def on_ready():
     load_data()
     print(f"✅ Logged in as {bot.user}")
 
-
 # ---------------- START ----------------
-bot.run(TOKEN)
+keep_alive()
+
+try:
+    bot.run(TOKEN)
+
+finally:
+    save_data()
