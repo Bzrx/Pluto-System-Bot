@@ -262,6 +262,76 @@ class AcceptView(discord.ui.View):
             AcceptModal(self.order_id, member)
         )
 
+# ---------------- NEED COMMAND ----------------
+@bot.command()
+async def need(ctx, amount: str, rate: str):
+
+    seller_role = discord.utils.get(
+        ctx.guild.roles,
+        name=SELLER_ROLE_NAME
+    )
+
+    supplier_role = discord.utils.get(
+        ctx.guild.roles,
+        name=SUPPLIER_ROLE_NAME
+    )
+
+    if not seller_role or seller_role not in ctx.author.roles:
+        await ctx.send("❌ Only Seller role can use `!need`.")
+        return
+
+    if not supplier_role:
+        await ctx.send("❌ Supplier role not found.")
+        return
+
+    try:
+        amount_value = parse_amount(amount)
+    except:
+        await ctx.send("❌ Invalid amount.")
+        return
+
+    order_id = str(ctx.message.id)
+
+    active_orders[order_id] = {
+        "remaining": amount_value,
+        "original_amount": amount,
+        "rate": rate,
+        "seller": ctx.author,
+        "guild": ctx.guild
+    }
+
+    view = AcceptView(order_id)
+
+    sent = 0
+
+    for member in supplier_role.members:
+
+        if member.bot:
+            continue
+
+        try:
+            await member.send(
+                f"📢 **NEW ORDER**\n\n"
+                f"💰 Amount: {amount}\n"
+                f"💵 Rate: {rate} PHP",
+                view=view
+            )
+
+            sent += 1
+
+        except:
+            pass
+
+    await ctx.send(
+        f"✅ Sent to {sent} suppliers."
+    )
+
+# ---------------- ERROR HANDLER ----------------
+@bot.event
+async def on_command_error(ctx, error):
+    await ctx.send(f"❌ {error}")
+    print(error)
+
 # ---------------- READY ----------------
 @bot.event
 async def on_ready():
