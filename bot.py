@@ -7,7 +7,7 @@ from flask import Flask
 from threading import Thread
 
 # ---------------- KEEP ALIVE ----------------
-app = Flask(__name__)
+app = Flask('')
 
 @app.route('/')
 def home():
@@ -42,7 +42,9 @@ user_wallets = {}
 user_balances = {}
 cashout_ledger = {}
 
+# ---------------- SAVE FILE ----------------
 DATA_FILE = "data.json"
+
 
 # ---------------- SAVE / LOAD ----------------
 def save_data():
@@ -55,43 +57,43 @@ def save_data():
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+
 def load_data():
     global user_wallets
     global user_balances
     global cashout_ledger
 
     if not os.path.exists(DATA_FILE):
-        save_data()
         return
 
-    try:
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-    except:
-        data = {
-            "wallets": {},
-            "balances": {},
-            "ledger": {}
-        }
+    with open(DATA_FILE, "r") as f:
+        data = json.load(f)
 
+    # wallets
     user_wallets = {
-        int(k): v for k, v in data.get("wallets", {}).items()
+        int(k): v
+        for k, v in data.get("wallets", {}).items()
     }
 
+    # balances
     user_balances = {
-        int(k): v for k, v in data.get("balances", {}).items()
+        int(k): v
+        for k, v in data.get("balances", {}).items()
     }
 
+    # ledger
     cashout_ledger = {
-        int(k): v for k, v in data.get("ledger", {}).items()
+        int(k): v
+        for k, v in data.get("ledger", {}).items()
     }
+
 
 # ---------------- LOCK SYSTEM ----------------
 def get_lock(order_id):
     if order_id not in order_locks:
         order_locks[order_id] = asyncio.Lock()
-
     return order_locks[order_id]
+
 
 # ---------------- MONEY ----------------
 def parse_amount(value):
@@ -105,6 +107,7 @@ def parse_amount(value):
 
     return int(value)
 
+
 def format_amount(value):
     if value >= 1_000_000_000:
         return f"{value / 1_000_000_000:.1f}b".replace(".0", "")
@@ -114,13 +117,14 @@ def format_amount(value):
 
     return str(value)
 
+
 # ---------------- ACCEPT MODAL ----------------
 class AcceptModal(discord.ui.Modal, title="Accept Order"):
-
     sell_amount = discord.ui.TextInput(
         label="How much are you selling?",
-        placeholder="100m",
-        required=True
+        placeholder="Example: 100m",
+        required=True,
+        max_length=20
     )
 
     def __init__(self, order_id, supplier):
@@ -129,7 +133,6 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
         self.supplier = supplier
 
     async def on_submit(self, interaction: discord.Interaction):
-
         order = active_orders.get(self.order_id)
 
         if not order:
@@ -139,98 +142,93 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
             )
             return
 
-        try:
-            sell_value = parse_amount(self.sell_amount.value)
-        except:
+        lock = get_lock(self.order_id)
+
+        async with lock:
+            try:
+                sell_value = parse_amount(self.sell_amount.value)
+            except:
+                await interaction.response.send_message(
+                    "❌ Invalid amount.",
+                    ephemeral=True
+                )
+                return
+
+            remaining = order["remaining"]
+
+            if sell_value <= 0 or sell_value > remaining:
+                await interaction.response.send_message(
+                    "❌ Invalid amount.",
+                    ephemeral=True
+                )
+                return
+
+            guild = order["guild"]
+            seller = order["seller"]
+            supplier = self.supplier
+
+            category = discord.utils.get(
+                guild.categories,
+                name=TICKET_CATEGORY_NAME
+            )
+
+            if not category:
+                category = await guild.create_category(TICKET_CATEGORY_NAME)
+
+            ticket_name = supplier.name.lower().replace(" ", "-")
+
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(
+                    read_messages=False
+                ),
+                seller: discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True
+                ),
+                supplier: discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True
+                )
+            }
+
+            channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=category,
+                overwrites=overwrites
+            )
+
+            order["remaining"] -= sell_value
+            order["last_sell_amount"] = sell_value
+            order["last_supplier"] = supplier
+            order["ticket_channel_id"] = channel.id
+
+            await channel.send(
+                f"🎫 **ORDER STARTED**\n\n"
+                f"👤 Seller: {seller.mention}\n"
+                f"🛒 Supplier: {supplier.mention}\n\n"
+                f"💰 Selling: {format_amount(sell_value)}\n"
+                f"💵 Rate: {order['rate']} PHP\n\n"
+                f"Seller confirms with `!confirm`"
+            )
+
             await interaction.response.send_message(
-                "❌ Invalid amount.",
+                "✅ Ticket created.",
                 ephemeral=True
             )
-            return
 
-        remaining = order["remaining"]
-
-        if sell_value > remaining:
-            await interaction.response.send_message(
-                "❌ Amount exceeds remaining.",
-                ephemeral=True
-            )
-            return
-
-        guild = order["guild"]
-        seller = order["seller"]
-        supplier = self.supplier
-
-        category = discord.utils.get(
-            guild.categories,
-            name=TICKET_CATEGORY_NAME
-        )
-
-        if not category:
-            category = await guild.create_category(
-                TICKET_CATEGORY_NAME
-            )
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                read_messages=False
-            ),
-            seller: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            ),
-            supplier: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            ),
-            guild.me: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True
-            )
-        }
-
-        channel = await guild.create_text_channel(
-            name=f"ticket-{supplier.name}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        order["remaining"] -= sell_value
-        order["last_supplier"] = supplier
-        order["last_sell_amount"] = sell_value
-        order["ticket_channel_id"] = channel.id
-
-        await channel.send(
-            f"🎫 Order Started\n\n"
-            f"Seller: {seller.mention}\n"
-            f"Supplier: {supplier.mention}\n"
-            f"Amount: {format_amount(sell_value)}\n"
-            f"Rate: {order['rate']} PHP\n\n"
-            f"Use `!confirm` after payment."
-        )
-
-        await interaction.response.send_message(
-            "✅ Ticket created.",
-            ephemeral=True
-        )
 
 # ---------------- ACCEPT BUTTON ----------------
 class AcceptView(discord.ui.View):
-
     def __init__(self, order_id):
         super().__init__(timeout=None)
         self.order_id = order_id
 
-    @discord.ui.button(
-        label="Accept Order",
-        style=discord.ButtonStyle.green
-    )
-    async def accept(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
+    @discord.ui.button(label="Accept Order", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         order = active_orders.get(self.order_id)
 
         if not order:
@@ -241,15 +239,17 @@ class AcceptView(discord.ui.View):
             return
 
         guild = order["guild"]
-
         member = guild.get_member(interaction.user.id)
+        role = discord.utils.get(guild.roles, name=SUPPLIER_ROLE_NAME)
 
-        supplier_role = discord.utils.get(
-            guild.roles,
-            name=SUPPLIER_ROLE_NAME
-        )
+        if not member:
+            await interaction.response.send_message(
+                "❌ You are not in the server.",
+                ephemeral=True
+            )
+            return
 
-        if supplier_role not in member.roles:
+        if role not in member.roles:
             await interaction.response.send_message(
                 "❌ You are not a supplier.",
                 ephemeral=True
@@ -260,95 +260,165 @@ class AcceptView(discord.ui.View):
             AcceptModal(self.order_id, member)
         )
 
+
+# ---------------- CASHOUT CONFIRM BUTTON ----------------
+class CashoutConfirmView(discord.ui.View):
+    def __init__(self, supplier, amount):
+        super().__init__(timeout=None)
+        self.supplier = supplier
+        self.amount = amount
+
+    @discord.ui.button(
+        label="Confirm Sent",
+        style=discord.ButtonStyle.green
+    )
+    async def confirm_sent(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        button.disabled = True
+
+        user_balances[self.supplier.id] = 0
+        cashout_ledger[self.supplier.id] = []
+
+        save_data()
+
+        try:
+            await self.supplier.send(
+                f"✅ Your cashout of ₱{self.amount:,.2f} "
+                f"has been confirmed as sent by {interaction.user.mention}."
+            )
+        except:
+            pass
+
+        await interaction.response.edit_message(view=self)
+
+        await interaction.followup.send(
+            "✅ Cashout marked as sent.",
+            ephemeral=True
+        )
+
+
 # ---------------- NEED ----------------
 @bot.command()
 async def need(ctx, amount: str, rate: str):
-
     seller_role = discord.utils.get(
         ctx.guild.roles,
         name=SELLER_ROLE_NAME
     )
-
-    if seller_role not in ctx.author.roles:
-        await ctx.send(
-            "❌ Only Seller role can use this command."
-        )
-        return
 
     supplier_role = discord.utils.get(
         ctx.guild.roles,
         name=SUPPLIER_ROLE_NAME
     )
 
+    if not seller_role or seller_role not in ctx.author.roles:
+        await ctx.send("❌ Only Seller role can use `!need`.")
+        return
+
     if not supplier_role:
         await ctx.send("❌ Supplier role not found.")
         return
 
-    try:
-        amount_value = parse_amount(amount)
-    except:
-        await ctx.send("❌ Invalid amount.")
-        return
-
     order_id = str(ctx.message.id)
+    amount_value = parse_amount(amount)
 
     active_orders[order_id] = {
         "remaining": amount_value,
+        "original_amount": amount,
         "rate": rate,
         "seller": ctx.author,
         "guild": ctx.guild
     }
 
     view = AcceptView(order_id)
-
     sent = 0
 
     for member in supplier_role.members:
-
         if member.bot:
             continue
 
         try:
             await member.send(
-                f"📢 NEW ORDER\n\n"
-                f"Amount: {amount}\n"
-                f"Rate: {rate} PHP",
+                f"📢 **NEW ORDER**\n\n"
+                f"💰 Amount: {amount}\n"
+                f"💵 Rate: {rate} PHP",
                 view=view
             )
-
             sent += 1
-
         except:
             pass
 
-    await ctx.send(
-        f"✅ Sent order to {sent} suppliers."
-    )
+    await ctx.send(f"✅ Sent to {sent} suppliers.")
+
+
+# ---------------- WALLET ----------------
+@bot.command()
+async def wallet(ctx, action=None, method=None, *, value=None):
+    target = ctx.message.mentions[0] if ctx.message.mentions else None
+
+    # VIEW WALLET
+    if target:
+        wallets = user_wallets.get(target.id)
+
+        if not wallets:
+            await ctx.send(f"❌ {target.mention} has no saved wallet.")
+            return
+
+        ltc = wallets.get("ltc", "Not set")
+        gcash = wallets.get("gcash", "Not set")
+
+        await ctx.send(
+            f"💼 Wallets of {target.mention}\n"
+            f"**LTC:** {ltc}\n"
+            f"**GCash:** {gcash}"
+        )
+        return
+
+    # SET WALLET
+    if action != "set":
+        await ctx.send(
+            "Usage:\n"
+            "`!wallet set ltc ADDRESS`\n"
+            "`!wallet set gcash NUMBER`\n"
+            "`!wallet @user`"
+        )
+        return
+
+    if method not in ["ltc", "gcash"]:
+        await ctx.send("❌ Only `ltc` and `gcash` are allowed.")
+        return
+
+    if not value:
+        await ctx.send("❌ Please provide a value.")
+        return
+
+    user_wallets.setdefault(ctx.author.id, {})
+    user_wallets[ctx.author.id][method] = value
+
+    save_data()
+
+    await ctx.send(f"✅ {method.upper()} saved.")
+
 
 # ---------------- BALANCE ----------------
 @bot.command()
 async def balance(ctx):
-
-    target = (
-        ctx.message.mentions[0]
-        if ctx.message.mentions
-        else ctx.author
-    )
-
-    amount = user_balances.get(target.id, 0)
+    target = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
+    balance_value = user_balances.get(target.id, 0)
 
     await ctx.send(
-        f"💰 {target.mention} balance: ₱{amount:,.2f}"
+        f"💰 {target.mention}'s balance: ₱{balance_value:,.2f}"
     )
+
 
 # ---------------- CONFIRM ----------------
 @bot.command()
 async def confirm(ctx):
-
     order = None
 
     for data in active_orders.values():
-
         if (
             data["seller"].id == ctx.author.id
             and data.get("ticket_channel_id") == ctx.channel.id
@@ -357,9 +427,7 @@ async def confirm(ctx):
             break
 
     if not order:
-        await ctx.send(
-            "❌ No active order in this channel."
-        )
+        await ctx.send("❌ No active order found in this ticket.")
         return
 
     supplier = order.get("last_supplier")
@@ -369,14 +437,17 @@ async def confirm(ctx):
         await ctx.send("❌ Supplier not found.")
         return
 
-    credited = (
-        sold_amount / 1_000_000
-    ) * float(order["rate"])
+    credited = (sold_amount / 1_000_000) * float(order["rate"])
 
     user_balances[supplier.id] = (
-        user_balances.get(supplier.id, 0)
-        + credited
+        user_balances.get(supplier.id, 0) + credited
     )
+
+    cashout_ledger.setdefault(supplier.id, [])
+    cashout_ledger[supplier.id].append({
+        "seller_id": ctx.author.id,
+        "amount": credited
+    })
 
     save_data()
 
@@ -385,61 +456,91 @@ async def confirm(ctx):
         f"{supplier.mention} received ₱{credited:,.2f}"
     )
 
-# ---------------- WALLET ----------------
-@bot.command()
-async def wallet(ctx, method=None, *, value=None):
 
+# ---------------- CASHOUT ----------------
+@bot.command()
+async def cashout(ctx, method=None):
     if method is None:
         await ctx.send(
-            "Usage:\n"
-            "`!wallet ltc ADDRESS`\n"
-            "`!wallet gcash NUMBER`"
+            "❌ Usage: `!cashout gcash` or `!cashout ltc`"
         )
         return
 
     method = method.lower()
 
-    if method not in ["ltc", "gcash"]:
+    if method not in ["gcash", "ltc"]:
         await ctx.send(
-            "❌ Invalid wallet method."
+            "❌ Only `gcash` or `ltc` are allowed."
         )
         return
 
-    if not value:
+    entries = cashout_ledger.get(ctx.author.id, [])
+
+    if not entries:
+        await ctx.send("❌ You have no cashout balance.")
+        return
+
+    wallets = user_wallets.get(ctx.author.id, {})
+    wallet_value = wallets.get(method)
+
+    if not wallet_value:
         await ctx.send(
-            "❌ Missing wallet value."
+            f"❌ You do not have a {method.upper()} wallet set.\n"
+            f"Use `!wallet set {method} VALUE`"
         )
         return
 
-    user_wallets.setdefault(ctx.author.id, {})
-    user_wallets[ctx.author.id][method] = value
+    grouped = {}
 
-    save_data()
+    for entry in entries:
+        seller = ctx.guild.get_member(entry["seller_id"])
+
+        if not seller:
+            continue
+
+        if seller.id not in grouped:
+            grouped[seller.id] = {
+                "seller": seller,
+                "amount": 0
+            }
+
+        grouped[seller.id]["amount"] += entry["amount"]
+
+    sent = 0
+
+    for data in grouped.values():
+        seller = data["seller"]
+        amount = data["amount"]
+
+        try:
+            view = CashoutConfirmView(ctx.author, amount)
+
+            await seller.send(
+                f"💸 **CASHOUT REQUEST**\n\n"
+                f"Supplier: {ctx.author.mention}\n"
+                f"Amount: ₱{amount:,.2f}\n"
+                f"Method: {method.upper()}\n\n"
+                f"Wallet:\n`{wallet_value}`\n\n"
+                f"Press the button below after sending the payment.",
+                view=view
+            )
+
+            sent += 1
+
+        except:
+            pass
 
     await ctx.send(
-        f"✅ {method.upper()} wallet saved."
+        f"✅ Cashout request sent to {sent} seller(s)."
     )
 
-# ---------------- CASHOUT ----------------
-@bot.command()
-async def cashout(ctx):
 
-    balance = user_balances.get(ctx.author.id, 0)
-
-    if balance <= 0:
-        await ctx.send("❌ No balance available.")
-        return
-
-    await ctx.send(
-        f"💸 Cashout requested.\n"
-        f"Amount: ₱{balance:,.2f}"
-    )
-
-# ---------------- ERRORS ----------------
+# ---------------- ERROR HANDLER ----------------
 @bot.event
 async def on_command_error(ctx, error):
     print(error)
     await ctx.send(f"❌ {error}")
+
 
 # ---------------- READY ----------------
 @bot.event
@@ -447,10 +548,8 @@ async def on_ready():
     load_data()
     print(f"✅ Logged in as {bot.user}")
 
+
 # ---------------- START ----------------
 keep_alive()
 
-try:
-    bot.run(TOKEN)
-finally:
-    save_data()
+bot.run(TOKEN)
