@@ -33,6 +33,7 @@ TOKEN = os.getenv("TOKEN")
 SELLER_ROLE_NAME = "Seller"
 SUPPLIER_ROLE_NAME = "Supplier"
 TICKET_CATEGORY_NAME = "Tickets"
+BOT_COMMAND_CHANNEL = "bot-commands"
 
 # ---------------- STORAGE ----------------
 active_orders = {}
@@ -45,7 +46,6 @@ cashout_ledger = {}
 # ---------------- SAVE FILE ----------------
 DATA_FILE = "data.json"
 
-
 # ---------------- SAVE / LOAD ----------------
 def save_data():
     data = {
@@ -56,7 +56,6 @@ def save_data():
 
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
-
 
 def load_data():
     global user_wallets
@@ -69,31 +68,26 @@ def load_data():
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
 
-    # wallets
     user_wallets = {
         int(k): v
         for k, v in data.get("wallets", {}).items()
     }
 
-    # balances
     user_balances = {
         int(k): v
         for k, v in data.get("balances", {}).items()
     }
 
-    # ledger
     cashout_ledger = {
         int(k): v
         for k, v in data.get("ledger", {}).items()
     }
-
 
 # ---------------- LOCK SYSTEM ----------------
 def get_lock(order_id):
     if order_id not in order_locks:
         order_locks[order_id] = asyncio.Lock()
     return order_locks[order_id]
-
 
 # ---------------- MONEY ----------------
 def parse_amount(value):
@@ -107,7 +101,6 @@ def parse_amount(value):
 
     return int(value)
 
-
 def format_amount(value):
     if value >= 1_000_000_000:
         return f"{value / 1_000_000_000:.1f}b".replace(".0", "")
@@ -117,6 +110,20 @@ def format_amount(value):
 
     return str(value)
 
+# ---------------- ONLY BOT COMMANDS CHANNEL ----------------
+@bot.check
+async def globally_block_wrong_channels(ctx):
+    # allow DMs
+    if isinstance(ctx.channel, discord.DMChannel):
+        return True
+
+    if ctx.channel.name != BOT_COMMAND_CHANNEL:
+        await ctx.send(
+            f"❌ Commands can only be used in #{BOT_COMMAND_CHANNEL}."
+        )
+        return False
+
+    return True
 
 # ---------------- ACCEPT MODAL ----------------
 class AcceptModal(discord.ui.Modal, title="Accept Order"):
@@ -220,7 +227,6 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 ephemeral=True
             )
 
-
 # ---------------- ACCEPT BUTTON ----------------
 class AcceptView(discord.ui.View):
     def __init__(self, order_id):
@@ -260,7 +266,6 @@ class AcceptView(discord.ui.View):
             AcceptModal(self.order_id, member)
         )
 
-
 # ---------------- CASHOUT CONFIRM BUTTON ----------------
 class CashoutConfirmView(discord.ui.View):
     def __init__(self, supplier, amount):
@@ -298,7 +303,6 @@ class CashoutConfirmView(discord.ui.View):
             "✅ Cashout marked as sent.",
             ephemeral=True
         )
-
 
 # ---------------- NEED ----------------
 @bot.command()
@@ -352,7 +356,6 @@ async def need(ctx, amount: str, rate: str):
 
     await ctx.send(f"✅ Sent to {sent} suppliers.")
 
-
 # ---------------- WALLET ----------------
 @bot.command()
 async def wallet(ctx, action=None, method=None, *, value=None):
@@ -399,8 +402,13 @@ async def wallet(ctx, action=None, method=None, *, value=None):
 
     save_data()
 
-    await ctx.send(f"✅ {method.upper()} saved.")
+    # DELETE USER MESSAGE
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
+    await ctx.send(f"✅ {method.upper()} saved.")
 
 # ---------------- BALANCE ----------------
 @bot.command()
@@ -411,7 +419,6 @@ async def balance(ctx):
     await ctx.send(
         f"💰 {target.mention}'s balance: ₱{balance_value:,.2f}"
     )
-
 
 # ---------------- CONFIRM ----------------
 @bot.command()
@@ -455,7 +462,6 @@ async def confirm(ctx):
         f"✅ Confirmed.\n"
         f"{supplier.mention} received ₱{credited:,.2f}"
     )
-
 
 # ---------------- CASHOUT ----------------
 @bot.command()
@@ -534,20 +540,20 @@ async def cashout(ctx, method=None):
         f"✅ Cashout request sent to {sent} seller(s)."
     )
 
-
 # ---------------- ERROR HANDLER ----------------
 @bot.event
 async def on_command_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        return
+
     print(error)
     await ctx.send(f"❌ {error}")
-
 
 # ---------------- READY ----------------
 @bot.event
 async def on_ready():
     load_data()
     print(f"✅ Logged in as {bot.user}")
-
 
 # ---------------- START ----------------
 keep_alive()
