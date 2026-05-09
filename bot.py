@@ -35,14 +35,14 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------- CONFIG ----------------
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = "TOKEN"
 
 SELLER_ROLE_NAME = "Seller"
 SUPPLIER_ROLE_NAME = "Supplier"
 TICKET_CATEGORY_NAME = "Tickets"
 
-# ONLY THIS CHANNEL CAN USE COMMANDS
-BOT_COMMAND_CHANNEL = "bot-command"
+# ONLY THIS CHANNEL CLEANS COMMANDS
+BOT_COMMAND_CHANNEL = "bot-commands"
 
 # ---------------- STORAGE ----------------
 
@@ -82,17 +82,14 @@ def load_data():
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
 
-    # wallets
     user_wallets = {
         int(k): v for k, v in data.get("wallets", {}).items()
     }
 
-    # balances
     user_balances = {
         int(k): v for k, v in data.get("balances", {}).items()
     }
 
-    # ledger
     cashout_ledger = {
         int(k): v for k, v in data.get("ledger", {}).items()
     }
@@ -460,15 +457,8 @@ async def wallet(ctx, action=None, method=None, *, value=None):
 
     save_data()
 
-    # DELETE COMMAND MESSAGE
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-
     await ctx.send(
-        f"✅ {method.upper()} saved.",
-        delete_after=5
+        f"✅ {method.upper()} saved."
     )
 
 
@@ -635,7 +625,7 @@ async def cashout(ctx, method=None):
     )
 
 
-# ---------------- COMMAND CHANNEL LOCK ----------------
+# ---------------- MESSAGE FILTER ----------------
 
 @bot.event
 async def on_message(message):
@@ -643,23 +633,30 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # ONLY ALLOW COMMANDS IN #bot-command
-    if message.content.startswith("!"):
+    # CLEAN #bot-command CHANNEL
+    if message.channel.name == BOT_COMMAND_CHANNEL:
 
-        if message.channel.name != BOT_COMMAND_CHANNEL:
-
+        # DELETE NORMAL CHAT
+        if not message.content.startswith("!"):
             try:
                 await message.delete()
             except:
                 pass
 
-            await message.channel.send(
-                f"❌ Commands can only be used in #{BOT_COMMAND_CHANNEL}.",
-                delete_after=5
-            )
-
             return
 
+        # PROCESS COMMAND
+        await bot.process_commands(message)
+
+        # DELETE USER COMMAND MESSAGE
+        try:
+            await message.delete()
+        except:
+            pass
+
+        return
+
+    # OTHER CHANNELS
     await bot.process_commands(message)
 
 
@@ -682,4 +679,8 @@ async def on_ready():
 # ---------------- START ----------------
 
 keep_alive()
-bot.run(TOKEN)
+
+if TOKEN is None:
+    print("❌ TOKEN NOT FOUND")
+else:
+    bot.run(TOKEN)
