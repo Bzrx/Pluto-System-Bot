@@ -238,10 +238,48 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 overwrites=overwrites
             )
 
+            # UPDATE REMAINING
             order["remaining"] -= sell_value
+            remaining_after = order["remaining"]
+
+            # SAVE LAST TRANSACTION
             order["last_sell_amount"] = sell_value
             order["last_supplier"] = supplier
             order["ticket_channel_id"] = channel.id
+
+            # UPDATE ALL SUPPLIER DMS
+            for msg in order.get("messages", []):
+
+                try:
+
+                    # ORDER FILLED
+                    if remaining_after <= 0:
+
+                        await msg.edit(
+                            content=(
+                                f"❌ ORDER FILLED\n\n"
+                                f"Original Amount: "
+                                f"{order['original_amount']}\n"
+                                f"Rate: {order['rate']} PHP"
+                            ),
+                            view=None
+                        )
+
+                    # ORDER STILL OPEN
+                    else:
+
+                        await msg.edit(
+                            content=(
+                                f"📢 **NEW ORDER**\n\n"
+                                f"💰 Remaining: "
+                                f"{format_amount(remaining_after)}\n"
+                                f"💵 Rate: {order['rate']} PHP"
+                            ),
+                            view=AcceptView(self.order_id)
+                        )
+
+                except:
+                    pass
 
             await channel.send(
                 f"🎫 **ORDER STARTED**\n\n"
@@ -249,6 +287,8 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 f"🛒 Supplier: {supplier.mention}\n\n"
                 f"💰 Selling: {format_amount(sell_value)}\n"
                 f"💵 Rate: {order['rate']} PHP\n\n"
+                f"Remaining Order: "
+                f"{format_amount(remaining_after)}\n\n"
                 f"Seller confirms with !confirm"
             )
 
@@ -281,6 +321,13 @@ class AcceptView(discord.ui.View):
         if not order:
             await interaction.response.send_message(
                 "❌ Order not found.",
+                ephemeral=True
+            )
+            return
+
+        if order["remaining"] <= 0:
+            await interaction.response.send_message(
+                "❌ This order is already filled.",
                 ephemeral=True
             )
             return
@@ -342,7 +389,8 @@ class CashoutConfirmView(discord.ui.View):
         try:
             await self.supplier.send(
                 f"✅ Your cashout of ₱{self.amount:,.2f} "
-                f"has been confirmed as sent by {interaction.user.mention}."
+                f"has been confirmed as sent by "
+                f"{interaction.user.mention}."
             )
 
         except:
@@ -381,6 +429,7 @@ async def need(ctx, amount: str, rate: str):
 
     try:
         amount_value = parse_amount(amount)
+
     except:
         await ctx.send("❌ Invalid amount.")
         return
@@ -392,7 +441,8 @@ async def need(ctx, amount: str, rate: str):
         "original_amount": amount,
         "rate": rate,
         "seller": ctx.author,
-        "guild": ctx.guild
+        "guild": ctx.guild,
+        "messages": []
     }
 
     view = AcceptView(order_id)
@@ -405,19 +455,25 @@ async def need(ctx, amount: str, rate: str):
             continue
 
         try:
-            await member.send(
+
+            msg = await member.send(
                 f"📢 **NEW ORDER**\n\n"
-                f"💰 Amount: {amount}\n"
+                f"💰 Remaining: {amount}\n"
                 f"💵 Rate: {rate} PHP",
                 view=view
             )
+
+            # SAVE MESSAGE
+            active_orders[order_id]["messages"].append(msg)
 
             sent += 1
 
         except:
             pass
 
-    await ctx.send(f"✅ Sent to {sent} suppliers.")
+    await ctx.send(
+        f"✅ Sent to {sent} suppliers."
+    )
 
 
 # ---------------- WALLET ----------------
@@ -497,7 +553,8 @@ async def balance(ctx):
     balance_value = user_balances.get(target.id, 0)
 
     await ctx.send(
-        f"💰 {target.mention}'s balance: ₱{balance_value:,.2f}"
+        f"💰 {target.mention}'s balance: "
+        f"₱{balance_value:,.2f}"
     )
 
 
@@ -552,7 +609,8 @@ async def confirm(ctx):
 
     await ctx.send(
         f"✅ Confirmed.\n"
-        f"{supplier.mention} received ₱{credited:,.2f}"
+        f"{supplier.mention} received "
+        f"₱{credited:,.2f}"
     )
 
 
@@ -589,7 +647,8 @@ async def cashout(ctx, method=None):
 
     if not wallet_value:
         await ctx.send(
-            f"❌ You do not have a {method.upper()} wallet set.\n"
+            f"❌ You do not have a "
+            f"{method.upper()} wallet set.\n"
             f"Use !wallet set {method} VALUE"
         )
         return
@@ -632,7 +691,8 @@ async def cashout(ctx, method=None):
                 f"Amount: ₱{amount:,.2f}\n"
                 f"Method: {method.upper()}\n\n"
                 f"Wallet:\n{wallet_value}\n\n"
-                f"Press the button below after sending the payment.",
+                f"Press the button below after sending "
+                f"the payment.",
                 view=view
             )
 
@@ -642,7 +702,8 @@ async def cashout(ctx, method=None):
             pass
 
     await ctx.send(
-        f"✅ Cashout request sent to {sent} seller(s)."
+        f"✅ Cashout request sent "
+        f"to {sent} seller(s)."
     )
 
 
@@ -655,7 +716,10 @@ async def on_message(message):
         return
 
     # CLEAN #bot-command CHANNEL
-    if hasattr(message.channel, "name") and message.channel.name == BOT_COMMAND_CHANNEL:
+    if (
+        hasattr(message.channel, "name")
+        and message.channel.name == BOT_COMMAND_CHANNEL
+    ):
 
         # DELETE NORMAL CHAT
         if not message.content.startswith("!"):
