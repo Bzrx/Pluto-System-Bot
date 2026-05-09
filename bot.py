@@ -5,6 +5,19 @@ import json
 import os
 from flask import Flask
 from threading import Thread
+from dotenv import load_dotenv
+
+# ---------------- LOAD ENV ----------------
+
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+
+if not TOKEN:
+    raise ValueError(
+        "❌ TOKEN environment variable is missing.\n"
+        "Add TOKEN in Render Environment Variables or .env file."
+    )
 
 # ---------------- KEEP ALIVE ----------------
 
@@ -17,11 +30,13 @@ def home():
 
 
 def run_web():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 
 def keep_alive():
     t = Thread(target=run_web)
+    t.daemon = True
     t.start()
 
 
@@ -34,8 +49,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------- CONFIG ----------------
-
-TOKEN = "TOKEN"
 
 SELLER_ROLE_NAME = "Seller"
 SUPPLIER_ROLE_NAME = "Supplier"
@@ -79,20 +92,24 @@ def load_data():
     if not os.path.exists(DATA_FILE):
         return
 
-    with open(DATA_FILE, "r") as f:
-        data = json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
 
-    user_wallets = {
-        int(k): v for k, v in data.get("wallets", {}).items()
-    }
+        user_wallets = {
+            int(k): v for k, v in data.get("wallets", {}).items()
+        }
 
-    user_balances = {
-        int(k): v for k, v in data.get("balances", {}).items()
-    }
+        user_balances = {
+            int(k): v for k, v in data.get("balances", {}).items()
+        }
 
-    cashout_ledger = {
-        int(k): v for k, v in data.get("ledger", {}).items()
-    }
+        cashout_ledger = {
+            int(k): v for k, v in data.get("ledger", {}).items()
+        }
+
+    except Exception as e:
+        print(f"❌ Failed to load data: {e}")
 
 
 # ---------------- LOCK SYSTEM ----------------
@@ -107,7 +124,7 @@ def get_lock(order_id):
 # ---------------- MONEY ----------------
 
 def parse_amount(value):
-    value = value.lower()
+    value = value.lower().replace(",", "").strip()
 
     if value.endswith("b"):
         return int(float(value[:-1]) * 1_000_000_000)
@@ -362,9 +379,13 @@ async def need(ctx, amount: str, rate: str):
         await ctx.send("❌ Supplier role not found.")
         return
 
-    order_id = str(ctx.message.id)
+    try:
+        amount_value = parse_amount(amount)
+    except:
+        await ctx.send("❌ Invalid amount.")
+        return
 
-    amount_value = parse_amount(amount)
+    order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
         "remaining": amount_value,
@@ -634,7 +655,7 @@ async def on_message(message):
         return
 
     # CLEAN #bot-command CHANNEL
-    if message.channel.name == BOT_COMMAND_CHANNEL:
+    if hasattr(message.channel, "name") and message.channel.name == BOT_COMMAND_CHANNEL:
 
         # DELETE NORMAL CHAT
         if not message.content.startswith("!"):
@@ -665,7 +686,11 @@ async def on_message(message):
 @bot.event
 async def on_command_error(ctx, error):
     print(error)
-    await ctx.send(f"❌ {error}")
+
+    try:
+        await ctx.send(f"❌ {error}")
+    except:
+        pass
 
 
 # ---------------- READY ----------------
@@ -673,14 +698,21 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_ready():
     load_data()
+
+    print("=" * 50)
     print(f"✅ Logged in as {bot.user}")
+    print("=" * 50)
 
 
 # ---------------- START ----------------
 
 keep_alive()
 
-if TOKEN is None:
-    print("❌ TOKEN NOT FOUND")
-else:
+try:
     bot.run(TOKEN)
+
+except discord.LoginFailure:
+    print("❌ Invalid Discord Token")
+
+except Exception as e:
+    print(f"❌ Bot crashed: {e}")
