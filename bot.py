@@ -1,23 +1,39 @@
 import discord
 from discord.ext import commands
 import asyncio
-import json
 import os
 from flask import Flask
 from threading import Thread
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 # ---------------- LOAD ENV ----------------
 
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
 
 if not TOKEN:
     raise ValueError(
         "❌ TOKEN environment variable is missing.\n"
         "Add TOKEN in Render Environment Variables or .env file."
     )
+
+if not MONGO_URI:
+    raise ValueError(
+        "❌ MONGO_URI environment variable is missing."
+    )
+
+# ---------------- MONGODB ----------------
+
+client = MongoClient(MONGO_URI)
+
+db = client["pluto_bot"]
+
+wallets_collection = db["wallets"]
+balances_collection = db["balances"]
+ledger_collection = db["ledger"]
 
 # ---------------- KEEP ALIVE ----------------
 
@@ -60,56 +76,6 @@ BOT_COMMAND_CHANNEL = "bot-commands"
 
 active_orders = {}
 order_locks = {}
-
-user_wallets = {}
-user_balances = {}
-cashout_ledger = {}
-
-# ---------------- SAVE FILE ----------------
-
-DATA_FILE = "data.json"
-
-# ---------------- SAVE / LOAD ----------------
-
-
-def save_data():
-    data = {
-        "wallets": user_wallets,
-        "balances": user_balances,
-        "ledger": cashout_ledger
-    }
-
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-
-def load_data():
-    global user_wallets
-    global user_balances
-    global cashout_ledger
-
-    if not os.path.exists(DATA_FILE):
-        return
-
-    try:
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-
-        user_wallets = {
-            int(k): v for k, v in data.get("wallets", {}).items()
-        }
-
-        user_balances = {
-            int(k): v for k, v in data.get("balances", {}).items()
-        }
-
-        cashout_ledger = {
-            int(k): v for k, v in data.get("ledger", {}).items()
-        }
-
-    except Exception as e:
-        print(f"❌ Failed to load data: {e}")
-
 
 # ---------------- LOCK SYSTEM ----------------
 
@@ -187,7 +153,6 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
             remaining = order["remaining"]
 
-            # EXACT ORDER CHECK
             if order.get("exact"):
 
                 if sell_value != remaining:
@@ -249,21 +214,17 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 overwrites=overwrites
             )
 
-            # UPDATE REMAINING
             order["remaining"] -= sell_value
             remaining_after = order["remaining"]
 
-            # SAVE LAST TRANSACTION
             order["last_sell_amount"] = sell_value
             order["last_supplier"] = supplier
             order["ticket_channel_id"] = channel.id
 
-            # UPDATE ALL SUPPLIER DMS
             for msg in order.get("messages", []):
 
                 try:
 
-                    # ORDER FILLED
                     if remaining_after <= 0:
 
                         await msg.edit(
@@ -276,7 +237,6 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                             view=None
                         )
 
-                    # ORDER STILL OPEN
                     else:
 
                         await msg.edit(
@@ -392,10 +352,17 @@ class CashoutConfirmView(discord.ui.View):
 
         button.disabled = True
 
-        user_balances[self.supplier.id] = 0
-        cashout_ledger[self.supplier.id] = []
+        balances_collection.update_one(
+            {"user_id": str(self.supplier.id)},
+            {"$set": {"balance": 0}},
+            upsert=True
+        )
 
-        save_data()
+        ledger_collection.update_one(
+            {"user_id": str(self.supplier.id)},
+            {"$set": {"entries": []}},
+            upsert=True
+        )
 
         try:
             await self.supplier.send(
@@ -568,16 +535,34 @@ async def wallet(ctx, action=None, method=None, *, value=None):
     target = (
         ctx.message.mentions[0]
         if ctx.message.mentions
-        else None
+        else ctx.author
     )
 
-    if target:
+    wallets = wallets_collection.find_one(
+        {"user_id": str(target.id)}
+    )
 
-        wallets = user_wallets.get(target.id)
+    if action is None and target == ctx.author:
+
+        if not wallets:
+            await ctx.send("❌ No wallet saved.")
+            return
+
+        ltc = wallets.get("ltc", "Not set")
+        gcash = wallets.get("gcash", "Not set")
+
+        await ctx.send(
+            f"💼 Your Wallets\n"
+            f"**LTC:** {ltc}\n"
+            f"**GCash:** {gcash}"
+        )
+        return
+
+    if ctx.message.mentions:
 
         if not wallets:
             await ctx.send(
-                f"❌ {target.mention} has no saved wallet."
+                f"❌ {target.mention} has no wallet saved."
             )
             return
 
@@ -589,15 +574,14 @@ async def wallet(ctx, action=None, method=None, *, value=None):
             f"**LTC:** {ltc}\n"
             f"**GCash:** {gcash}"
         )
-
         return
 
     if action != "set":
         await ctx.send(
             "Usage:\n"
+            "!wallet\n"
             "!wallet set ltc ADDRESS\n"
-            "!wallet set gcash NUMBER\n"
-            "!wallet @user"
+            "!wallet set gcash NUMBER"
         )
         return
 
@@ -611,125 +595,44 @@ async def wallet(ctx, action=None, method=None, *, value=None):
         await ctx.send("❌ Please provide a value.")
         return
 
-    user_wallets.setdefault(ctx.author.id, {})
-    user_wallets[ctx.author.id][method] = value
-
-    save_data()
+    wallets_collection.update_one(
+        {"user_id": str(ctx.author.id)},
+        {
+            "$set": {
+                method: value
+            }
+        },
+        upsert=True
+    )
 
     await ctx.send(
-        f"✅ {method.upper()} saved."
+        f"✅ {method.upper()} wallet saved."
     )
 
 
 # ---------------- BALANCE ----------------
 
 @bot.command()
-async def balance(ctx, action=None, target: discord.Member = None, amount: float = None):
+async def balance(ctx):
 
-    # ---------------- VIEW BALANCE ----------------
-
-    if action is None:
-
-        target_user = (
-            ctx.message.mentions[0]
-            if ctx.message.mentions
-            else ctx.author
-        )
-
-        balance_value = user_balances.get(target_user.id, 0)
-
-        await ctx.send(
-            f"💰 {target_user.mention}'s balance: "
-            f"₱{balance_value:,.2f}"
-        )
-        return
-
-    # ---------------- CHECK BUYER ROLE ----------------
-
-    buyer_role = discord.utils.get(
-        ctx.guild.roles,
-        name=BUYER_ROLE_NAME
+    target = (
+        ctx.message.mentions[0]
+        if ctx.message.mentions
+        else ctx.author
     )
 
-    if buyer_role not in ctx.author.roles:
-        await ctx.send("❌ Only buyers can manage balances.")
-        return
+    data = balances_collection.find_one(
+        {"user_id": str(target.id)}
+    )
 
-    # ---------------- ADD BALANCE ----------------
+    balance_value = 0
 
-    if action.lower() == "add":
-
-        if not target or amount is None:
-            await ctx.send(
-                "❌ Usage: !balance add @user 500"
-            )
-            return
-
-        # ADD BALANCE
-        user_balances[target.id] = (
-            user_balances.get(target.id, 0)
-            + amount
-        )
-
-        # SAVE CASHOUT OWNER
-        cashout_ledger.setdefault(target.id, [])
-
-        cashout_ledger[target.id].append({
-            "buyer_id": ctx.author.id,
-            "amount": amount
-        })
-
-        save_data()
-
-        await ctx.send(
-            f"✅ Added ₱{amount:,.2f} "
-            f"to {target.mention}'s balance.\n"
-            f"New Balance: ₱{user_balances[target.id]:,.2f}"
-        )
-
-        return
-
-    # ---------------- REMOVE BALANCE ----------------
-
-    if action.lower() == "remove":
-
-        if not target or amount is None:
-            await ctx.send(
-                "❌ Usage: !balance remove @user 500"
-            )
-            return
-
-        current_balance = user_balances.get(target.id, 0)
-
-        if amount > current_balance:
-            await ctx.send(
-                "❌ Cannot remove more than current balance."
-            )
-            return
-
-        # REMOVE BALANCE
-        user_balances[target.id] = (
-            current_balance - amount
-        )
-
-        save_data()
-
-        await ctx.send(
-            f"✅ Removed ₱{amount:,.2f} "
-            f"from {target.mention}'s balance.\n"
-            f"New Balance: ₱{user_balances[target.id]:,.2f}"
-        )
-
-        return
-
-    # ---------------- INVALID ACTION ----------------
+    if data:
+        balance_value = data.get("balance", 0)
 
     await ctx.send(
-        "Usage:\n"
-        "!balance\n"
-        "!balance @user\n"
-        "!balance add @user 500\n"
-        "!balance remove @user 500"
+        f"💰 {target.mention}'s balance: "
+        f"₱{balance_value:,.2f}"
     )
 
 
@@ -768,19 +671,44 @@ async def confirm(ctx):
         * float(order["rate"])
     )
 
-    user_balances[supplier.id] = (
-        user_balances.get(supplier.id, 0)
-        + credited
+    old_balance = balances_collection.find_one(
+        {"user_id": str(supplier.id)}
     )
 
-    cashout_ledger.setdefault(supplier.id, [])
+    current_balance = 0
 
-    cashout_ledger[supplier.id].append({
+    if old_balance:
+        current_balance = old_balance.get("balance", 0)
+
+    balances_collection.update_one(
+        {"user_id": str(supplier.id)},
+        {
+            "$set": {
+                "balance": current_balance + credited
+            }
+        },
+        upsert=True
+    )
+
+    ledger = ledger_collection.find_one(
+        {"user_id": str(supplier.id)}
+    )
+
+    entries = []
+
+    if ledger:
+        entries = ledger.get("entries", [])
+
+    entries.append({
         "buyer_id": ctx.author.id,
         "amount": credited
     })
 
-    save_data()
+    ledger_collection.update_one(
+        {"user_id": str(supplier.id)},
+        {"$set": {"entries": entries}},
+        upsert=True
+    )
 
     await ctx.send(
         f"✅ Confirmed.\n"
@@ -808,7 +736,14 @@ async def cashout(ctx, method=None):
         )
         return
 
-    entries = cashout_ledger.get(ctx.author.id, [])
+    ledger = ledger_collection.find_one(
+        {"user_id": str(ctx.author.id)}
+    )
+
+    entries = []
+
+    if ledger:
+        entries = ledger.get("entries", [])
 
     if not entries:
         await ctx.send(
@@ -816,15 +751,22 @@ async def cashout(ctx, method=None):
         )
         return
 
-    wallets = user_wallets.get(ctx.author.id, {})
+    wallets = wallets_collection.find_one(
+        {"user_id": str(ctx.author.id)}
+    )
+
+    if not wallets:
+        await ctx.send(
+            "❌ No wallet found."
+        )
+        return
 
     wallet_value = wallets.get(method)
 
     if not wallet_value:
         await ctx.send(
             f"❌ You do not have a "
-            f"{method.upper()} wallet set.\n"
-            f"Use !wallet set {method} VALUE"
+            f"{method.upper()} wallet set."
         )
         return
 
@@ -855,6 +797,7 @@ async def cashout(ctx, method=None):
         amount = data["amount"]
 
         try:
+
             view = CashoutConfirmView(
                 ctx.author,
                 amount
@@ -931,7 +874,6 @@ async def on_command_error(ctx, error):
 
 @bot.event
 async def on_ready():
-    load_data()
 
     print("=" * 50)
     print(f"✅ Logged in as {bot.user}")
