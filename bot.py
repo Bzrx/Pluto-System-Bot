@@ -54,7 +54,6 @@ BUYER_ROLE_NAME = "Buyer"
 SUPPLIER_ROLE_NAME = "Supplier"
 TICKET_CATEGORY_NAME = "Tickets"
 
-# ONLY THIS CHANNEL CLEANS COMMANDS
 BOT_COMMAND_CHANNEL = "bot-commands"
 
 # ---------------- STORAGE ----------------
@@ -188,12 +187,24 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
             remaining = order["remaining"]
 
-            if sell_value <= 0 or sell_value > remaining:
-                await interaction.response.send_message(
-                    "❌ Invalid amount.",
-                    ephemeral=True
-                )
-                return
+            # EXACT ORDER CHECK
+            if order.get("exact"):
+
+                if sell_value != remaining:
+                    await interaction.response.send_message(
+                        f"❌ You must accept exactly {format_amount(remaining)}",
+                        ephemeral=True
+                    )
+                    return
+
+            else:
+
+                if sell_value <= 0 or sell_value > remaining:
+                    await interaction.response.send_message(
+                        "❌ Invalid amount.",
+                        ephemeral=True
+                    )
+                    return
 
             guild = order["guild"]
             buyer = order["buyer"]
@@ -442,7 +453,8 @@ async def need(ctx, amount: str, rate: str):
         "rate": rate,
         "buyer": ctx.author,
         "guild": ctx.guild,
-        "messages": []
+        "messages": [],
+        "exact": False
     }
 
     view = AcceptView(order_id)
@@ -463,7 +475,6 @@ async def need(ctx, amount: str, rate: str):
                 view=view
             )
 
-            # SAVE MESSAGE
             active_orders[order_id]["messages"].append(msg)
 
             sent += 1
@@ -473,6 +484,79 @@ async def need(ctx, amount: str, rate: str):
 
     await ctx.send(
         f"✅ Sent to {sent} suppliers."
+    )
+
+
+# ---------------- NEED EXACT ----------------
+
+@bot.command()
+async def needexact(ctx, amount: str, rate: str):
+
+    buyer_role = discord.utils.get(
+        ctx.guild.roles,
+        name=BUYER_ROLE_NAME
+    )
+
+    supplier_role = discord.utils.get(
+        ctx.guild.roles,
+        name=SUPPLIER_ROLE_NAME
+    )
+
+    if not buyer_role or buyer_role not in ctx.author.roles:
+        await ctx.send("❌ Only Buyer role can use !needexact.")
+        return
+
+    if not supplier_role:
+        await ctx.send("❌ Supplier role not found.")
+        return
+
+    try:
+        amount_value = parse_amount(amount)
+
+    except:
+        await ctx.send("❌ Invalid amount.")
+        return
+
+    order_id = str(ctx.message.id)
+
+    active_orders[order_id] = {
+        "remaining": amount_value,
+        "original_amount": amount,
+        "rate": rate,
+        "buyer": ctx.author,
+        "guild": ctx.guild,
+        "messages": [],
+        "exact": True
+    }
+
+    view = AcceptView(order_id)
+
+    sent = 0
+
+    for member in supplier_role.members:
+
+        if member.bot:
+            continue
+
+        try:
+
+            msg = await member.send(
+                f"📢 **NEW EXACT ORDER**\n\n"
+                f"💰 Remaining: {amount}\n"
+                f"💵 Rate: {rate} PHP\n\n"
+                f"⚠️ Must be accepted fully.",
+                view=view
+            )
+
+            active_orders[order_id]["messages"].append(msg)
+
+            sent += 1
+
+        except:
+            pass
+
+    await ctx.send(
+        f"✅ Exact order sent to {sent} suppliers."
     )
 
 
@@ -487,7 +571,6 @@ async def wallet(ctx, action=None, method=None, *, value=None):
         else None
     )
 
-    # VIEW WALLET
     if target:
 
         wallets = user_wallets.get(target.id)
@@ -509,7 +592,6 @@ async def wallet(ctx, action=None, method=None, *, value=None):
 
         return
 
-    # SET WALLET
     if action != "set":
         await ctx.send(
             "Usage:\n"
@@ -715,13 +797,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # CLEAN #bot-command CHANNEL
     if (
         hasattr(message.channel, "name")
         and message.channel.name == BOT_COMMAND_CHANNEL
     ):
 
-        # DELETE NORMAL CHAT
         if not message.content.startswith("!"):
             try:
                 await message.delete()
@@ -730,10 +810,8 @@ async def on_message(message):
 
             return
 
-        # PROCESS COMMAND
         await bot.process_commands(message)
 
-        # DELETE USER COMMAND MESSAGE
         try:
             await message.delete()
         except:
@@ -741,7 +819,6 @@ async def on_message(message):
 
         return
 
-    # OTHER CHANNELS
     await bot.process_commands(message)
 
 
