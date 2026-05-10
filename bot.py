@@ -624,19 +624,112 @@ async def wallet(ctx, action=None, method=None, *, value=None):
 # ---------------- BALANCE ----------------
 
 @bot.command()
-async def balance(ctx):
+async def balance(ctx, action=None, target: discord.Member = None, amount: float = None):
 
-    target = (
-        ctx.message.mentions[0]
-        if ctx.message.mentions
-        else ctx.author
+    # ---------------- VIEW BALANCE ----------------
+
+    if action is None:
+
+        target_user = (
+            ctx.message.mentions[0]
+            if ctx.message.mentions
+            else ctx.author
+        )
+
+        balance_value = user_balances.get(target_user.id, 0)
+
+        await ctx.send(
+            f"💰 {target_user.mention}'s balance: "
+            f"₱{balance_value:,.2f}"
+        )
+        return
+
+    # ---------------- CHECK BUYER ROLE ----------------
+
+    buyer_role = discord.utils.get(
+        ctx.guild.roles,
+        name=BUYER_ROLE_NAME
     )
 
-    balance_value = user_balances.get(target.id, 0)
+    if buyer_role not in ctx.author.roles:
+        await ctx.send("❌ Only buyers can manage balances.")
+        return
+
+    # ---------------- ADD BALANCE ----------------
+
+    if action.lower() == "add":
+
+        if not target or amount is None:
+            await ctx.send(
+                "❌ Usage: !balance add @user 500"
+            )
+            return
+
+        # ADD BALANCE
+        user_balances[target.id] = (
+            user_balances.get(target.id, 0)
+            + amount
+        )
+
+        # SAVE CASHOUT OWNER
+        cashout_ledger.setdefault(target.id, [])
+
+        cashout_ledger[target.id].append({
+            "buyer_id": ctx.author.id,
+            "amount": amount
+        })
+
+        save_data()
+
+        await ctx.send(
+            f"✅ Added ₱{amount:,.2f} "
+            f"to {target.mention}'s balance.\n"
+            f"New Balance: ₱{user_balances[target.id]:,.2f}"
+        )
+
+        return
+
+    # ---------------- REMOVE BALANCE ----------------
+
+    if action.lower() == "remove":
+
+        if not target or amount is None:
+            await ctx.send(
+                "❌ Usage: !balance remove @user 500"
+            )
+            return
+
+        current_balance = user_balances.get(target.id, 0)
+
+        if amount > current_balance:
+            await ctx.send(
+                "❌ Cannot remove more than current balance."
+            )
+            return
+
+        # REMOVE BALANCE
+        user_balances[target.id] = (
+            current_balance - amount
+        )
+
+        save_data()
+
+        await ctx.send(
+            f"✅ Removed ₱{amount:,.2f} "
+            f"from {target.mention}'s balance.\n"
+            f"New Balance: ₱{user_balances[target.id]:,.2f}"
+        )
+
+        return
+
+    # ---------------- INVALID ACTION ----------------
 
     await ctx.send(
-        f"💰 {target.mention}'s balance: "
-        f"₱{balance_value:,.2f}"
+        "Usage:\n"
+        "!balance\n"
+        "!balance @user\n"
+        "!balance add @user 500\n"
+        "!balance remove @user 500"
     )
 
 
