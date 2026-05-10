@@ -50,7 +50,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------- CONFIG ----------------
 
-SELLER_ROLE_NAME = "Seller"
+BUYER_ROLE_NAME = "Buyer"
 SUPPLIER_ROLE_NAME = "Supplier"
 TICKET_CATEGORY_NAME = "Tickets"
 
@@ -196,7 +196,7 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 return
 
             guild = order["guild"]
-            seller = order["seller"]
+            buyer = order["buyer"]
             supplier = self.supplier
 
             category = discord.utils.get(
@@ -216,7 +216,7 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                     read_messages=False
                 ),
 
-                seller: discord.PermissionOverwrite(
+                buyer: discord.PermissionOverwrite(
                     read_messages=True,
                     send_messages=True
                 ),
@@ -283,13 +283,13 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
             await channel.send(
                 f"🎫 **ORDER STARTED**\n\n"
-                f"👤 Seller: {seller.mention}\n"
+                f"👤 Buyer: {buyer.mention}\n"
                 f"🛒 Supplier: {supplier.mention}\n\n"
                 f"💰 Selling: {format_amount(sell_value)}\n"
                 f"💵 Rate: {order['rate']} PHP\n\n"
                 f"Remaining Order: "
                 f"{format_amount(remaining_after)}\n\n"
-                f"Seller confirms with !confirm"
+                f"Buyer confirms with !confirm"
             )
 
             await interaction.response.send_message(
@@ -409,9 +409,9 @@ class CashoutConfirmView(discord.ui.View):
 @bot.command()
 async def need(ctx, amount: str, rate: str):
 
-    seller_role = discord.utils.get(
+    buyer_role = discord.utils.get(
         ctx.guild.roles,
-        name=SELLER_ROLE_NAME
+        name=BUYER_ROLE_NAME
     )
 
     supplier_role = discord.utils.get(
@@ -419,8 +419,8 @@ async def need(ctx, amount: str, rate: str):
         name=SUPPLIER_ROLE_NAME
     )
 
-    if not seller_role or seller_role not in ctx.author.roles:
-        await ctx.send("❌ Only Seller role can use !need.")
+    if not buyer_role or buyer_role not in ctx.author.roles:
+        await ctx.send("❌ Only Buyer role can use !need.")
         return
 
     if not supplier_role:
@@ -440,7 +440,7 @@ async def need(ctx, amount: str, rate: str):
         "remaining": amount_value,
         "original_amount": amount,
         "rate": rate,
-        "seller": ctx.author,
+        "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": []
     }
@@ -568,7 +568,7 @@ async def confirm(ctx):
     for data in active_orders.values():
 
         if (
-            data["seller"].id == ctx.author.id
+            data["buyer"].id == ctx.author.id
             and data.get("ticket_channel_id") == ctx.channel.id
         ):
             order = data
@@ -601,7 +601,7 @@ async def confirm(ctx):
     cashout_ledger.setdefault(supplier.id, [])
 
     cashout_ledger[supplier.id].append({
-        "seller_id": ctx.author.id,
+        "buyer_id": ctx.author.id,
         "amount": credited
     })
 
@@ -657,26 +657,26 @@ async def cashout(ctx, method=None):
 
     for entry in entries:
 
-        seller = ctx.guild.get_member(
-            entry["seller_id"]
+        buyer = ctx.guild.get_member(
+            entry["buyer_id"]
         )
 
-        if not seller:
+        if not buyer:
             continue
 
-        if seller.id not in grouped:
-            grouped[seller.id] = {
-                "seller": seller,
+        if buyer.id not in grouped:
+            grouped[buyer.id] = {
+                "buyer": buyer,
                 "amount": 0
             }
 
-        grouped[seller.id]["amount"] += entry["amount"]
+        grouped[buyer.id]["amount"] += entry["amount"]
 
     sent = 0
 
     for data in grouped.values():
 
-        seller = data["seller"]
+        buyer = data["buyer"]
         amount = data["amount"]
 
         try:
@@ -685,7 +685,7 @@ async def cashout(ctx, method=None):
                 amount
             )
 
-            await seller.send(
+            await buyer.send(
                 f"💸 **CASHOUT REQUEST**\n\n"
                 f"Supplier: {ctx.author.mention}\n"
                 f"Amount: ₱{amount:,.2f}\n"
@@ -703,7 +703,7 @@ async def cashout(ctx, method=None):
 
     await ctx.send(
         f"✅ Cashout request sent "
-        f"to {sent} seller(s)."
+        f"to {sent} buyer(s)."
     )
 
 
