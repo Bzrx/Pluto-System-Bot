@@ -385,7 +385,7 @@ class CashoutConfirmView(discord.ui.View):
 # ---------------- NEED ----------------
 
 @bot.command()
-async def need(ctx, amount: str, rate: str):
+async def need(ctx, amount: str, rate: str, *, description=None):
 
     buyer_role = discord.utils.get(
         ctx.guild.roles,
@@ -412,6 +412,9 @@ async def need(ctx, amount: str, rate: str):
         await ctx.send("❌ Invalid amount.")
         return
 
+    if not description:
+        description = "No description provided."
+
     order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
@@ -421,7 +424,8 @@ async def need(ctx, amount: str, rate: str):
         "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": [],
-        "exact": False
+        "exact": False,
+        "description": description
     }
 
     view = AcceptView(order_id)
@@ -438,7 +442,8 @@ async def need(ctx, amount: str, rate: str):
             msg = await member.send(
                 f"📢 **NEW ORDER**\n\n"
                 f"💰 Remaining: {amount}\n"
-                f"💵 Rate: {rate} PHP",
+                f"💵 Rate: {rate} PHP\n"
+                f"📝 Description: {description}",
                 view=view
             )
 
@@ -457,7 +462,7 @@ async def need(ctx, amount: str, rate: str):
 # ---------------- NEED EXACT ----------------
 
 @bot.command()
-async def needexact(ctx, amount: str, rate: str):
+async def needexact(ctx, amount: str, rate: str, *, description=None):
 
     buyer_role = discord.utils.get(
         ctx.guild.roles,
@@ -484,6 +489,9 @@ async def needexact(ctx, amount: str, rate: str):
         await ctx.send("❌ Invalid amount.")
         return
 
+    if not description:
+        description = "No description provided."
+
     order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
@@ -493,7 +501,8 @@ async def needexact(ctx, amount: str, rate: str):
         "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": [],
-        "exact": True
+        "exact": True,
+        "description": description
     }
 
     view = AcceptView(order_id)
@@ -510,7 +519,8 @@ async def needexact(ctx, amount: str, rate: str):
             msg = await member.send(
                 f"📢 **NEW EXACT ORDER**\n\n"
                 f"💰 Remaining: {amount}\n"
-                f"💵 Rate: {rate} PHP\n\n"
+                f"💵 Rate: {rate} PHP\n"
+                f"📝 Description: {description}\n\n"
                 f"⚠️ Must be accepted fully.",
                 view=view
             )
@@ -525,7 +535,6 @@ async def needexact(ctx, amount: str, rate: str):
     await ctx.send(
         f"✅ Exact order sent to {sent} suppliers."
     )
-
 
 # ---------------- WALLET ----------------
 
