@@ -141,15 +141,14 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
         async with lock:
 
-    if order.get("processing"):
-        await interaction.response.send_message(
-            "❌ Someone is already accepting this order.",
-            ephemeral=True
-        )
-        return
+            if order.get("processing"):
+                await interaction.response.send_message(
+                    "❌ Someone is already accepting this order.",
+                    ephemeral=True
+                )
+                return
 
-    order["processing"] = True
-
+            order["processing"] = True
             try:
                 sell_value = parse_amount(self.sell_amount.value)
 
