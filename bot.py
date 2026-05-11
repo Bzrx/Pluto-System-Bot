@@ -167,13 +167,13 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
                 if sell_value != remaining:
 
-    order["processing"] = False
+                    order["processing"] = False
 
-    await interaction.response.send_message(
-        f"❌ You must accept exactly {format_amount(remaining)}",
-        ephemeral=True
-    )
-    return
+                    await interaction.response.send_message(
+                        f"❌ You must accept exactly {format_amount(remaining)}",
+                        ephemeral=True
+                    )
+                    return
 
             else:
 
