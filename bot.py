@@ -141,10 +141,22 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
         async with lock:
 
+            if order.get("processing"):
+                await interaction.response.send_message(
+                    "❌ Someone is already accepting this order.",
+                    ephemeral=True
+                )
+                return
+
+            order["processing"] = True
+
             try:
                 sell_value = parse_amount(self.sell_amount.value)
 
             except:
+
+                order["processing"] = False
+
                 await interaction.response.send_message(
                     "❌ Invalid amount.",
                     ephemeral=True
@@ -156,6 +168,9 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
             if order.get("exact"):
 
                 if sell_value != remaining:
+
+                    order["processing"] = False
+
                     await interaction.response.send_message(
                         f"❌ You must accept exactly {format_amount(remaining)}",
                         ephemeral=True
@@ -165,6 +180,9 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
             else:
 
                 if sell_value <= 0 or sell_value > remaining:
+
+                    order["processing"] = False
+
                     await interaction.response.send_message(
                         "❌ Invalid amount.",
                         ephemeral=True
@@ -186,9 +204,9 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                 )
 
             ticket_name = (
-    f"{supplier.name.lower().replace(' ', '-')}-"
-    f"{self.order_id[-4:]}"
-)
+                f"{supplier.name.lower().replace(' ', '-')}-"
+                f"{self.order_id[-4:]}"
+            )
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
@@ -226,53 +244,56 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
             messages = order.get("messages", [])[:]
 
-async def safe_edit(msg):
+            async def safe_edit(msg):
 
-    try:
+                try:
 
-        if remaining_after <= 0:
+                    if remaining_after <= 0:
 
-            await msg.edit(
-                content=(
-                    f"❌ ORDER FILLED\n\n"
-                    f"Original Amount: "
-                    f"{order['original_amount']}\n"
-                    f"Rate: {order['rate']} PHP"
-                ),
-                view=None
+                        await msg.edit(
+                            content=(
+                                f"❌ ORDER FILLED\n\n"
+                                f"Original Amount: "
+                                f"{order['original_amount']}\n"
+                                f"Rate: {order['rate']} PHP"
+                            ),
+                            view=None
+                        )
+
+                    else:
+
+                        await msg.edit(
+                            content=(
+                                f"📢 **NEW ORDER**\n\n"
+                                f"💰 Remaining: "
+                                f"{format_amount(remaining_after)}\n"
+                                f"💵 Rate: {order['rate']} PHP\n"
+                                f"📝 Description: "
+                                f"{order.get('description', 'None')}"
+                            ),
+                            view=AcceptView(self.order_id)
+                        )
+
+                except:
+                    pass
+
+            await asyncio.gather(
+                *[safe_edit(msg) for msg in messages]
             )
 
-        else:
-
-            await msg.edit(
-                content=(
-                    f"📢 **NEW ORDER**\n\n"
-                    f"💰 Remaining: "
-                    f"{format_amount(remaining_after)}\n"
-                    f"💵 Rate: {order['rate']} PHP\n"
-                    f"📝 Description: "
-                    f"{order.get('description', 'None')}"
-                ),
-                view=AcceptView(self.order_id)
+            await channel.send(
+                f"🎫 **ORDER STARTED**\n\n"
+                f"👤 Buyer: {buyer.mention}\n"
+                f"🛒 Supplier: {supplier.mention}\n\n"
+                f"💰 Selling: {format_amount(sell_value)}\n"
+                f"💵 Rate: {order['rate']} PHP\n"
+                f"📝 Description: {order.get('description', 'None')}\n\n"
+                f"Remaining Order: "
+                f"{format_amount(remaining_after)}\n\n"
+                f"Buyer confirms with !confirm"
             )
 
-    except:
-        pass
-
-await asyncio.gather(
-    *[safe_edit(msg) for msg in messages]
-)
-
-await channel.send(
-    f"🎫 **ORDER STARTED**\n\n"
-    f"👤 Buyer: {buyer.mention}\n"
-    f"🛒 Supplier: {supplier.mention}\n\n"
-    f"💰 Selling: {format_amount(sell_value)}\n"
-    f"💵 Rate: {order['rate']} PHP\n\n"
-    f"Remaining Order: "
-    f"{format_amount(remaining_after)}\n\n"
-    f"Buyer confirms with !confirm"
-)
+            order["processing"] = False
 
             await interaction.response.send_message(
                 "✅ Ticket created.",
