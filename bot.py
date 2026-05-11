@@ -154,13 +154,13 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
             except:
 
-    order["processing"] = False
+                order["processing"] = False
 
-    await interaction.response.send_message(
-        "❌ Invalid amount.",
-        ephemeral=True
-    )
-    return
+                await interaction.response.send_message(
+                    "❌ Invalid amount.",
+                    ephemeral=True
+                )
+                return
             remaining = order["remaining"]
 
             if order.get("exact"):
