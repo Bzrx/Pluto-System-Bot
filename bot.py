@@ -263,16 +263,16 @@ await asyncio.gather(
     *[safe_edit(msg) for msg in messages]
 )
 
-            await channel.send(
-                f"🎫 **ORDER STARTED**\n\n"
-                f"👤 Buyer: {buyer.mention}\n"
-                f"🛒 Supplier: {supplier.mention}\n\n"
-                f"💰 Selling: {format_amount(sell_value)}\n"
-                f"💵 Rate: {order['rate']} PHP\n\n"
-                f"Remaining Order: "
-                f"{format_amount(remaining_after)}\n\n"
-                f"Buyer confirms with !confirm"
-            )
+await channel.send(
+    f"🎫 **ORDER STARTED**\n\n"
+    f"👤 Buyer: {buyer.mention}\n"
+    f"🛒 Supplier: {supplier.mention}\n\n"
+    f"💰 Selling: {format_amount(sell_value)}\n"
+    f"💵 Rate: {order['rate']} PHP\n\n"
+    f"Remaining Order: "
+    f"{format_amount(remaining_after)}\n\n"
+    f"Buyer confirms with !confirm"
+)
 
             await interaction.response.send_message(
                 "✅ Ticket created.",
