@@ -141,30 +141,53 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
         async with lock:
 
+    if order.get("processing"):
+        await interaction.response.send_message(
+            "❌ Someone is already accepting this order.",
+            ephemeral=True
+        )
+        return
+
+    order["processing"] = True
+
             try:
                 sell_value = parse_amount(self.sell_amount.value)
 
             except:
-                await interaction.response.send_message(
-                    "❌ Invalid amount.",
-                    ephemeral=True
-                )
-                return
 
+    order["processing"] = False
+
+    await interaction.response.send_message(
+        "❌ Invalid amount.",
+        ephemeral=True
+    )
+    return
             remaining = order["remaining"]
 
             if order.get("exact"):
 
                 if sell_value != remaining:
-                    await interaction.response.send_message(
-                        f"❌ You must accept exactly {format_amount(remaining)}",
-                        ephemeral=True
-                    )
-                    return
+
+    order["processing"] = False
+
+    await interaction.response.send_message(
+        f"❌ You must accept exactly {format_amount(remaining)}",
+        ephemeral=True
+    )
+    return
 
             else:
 
                 if sell_value <= 0 or sell_value > remaining:
+
+    order["processing"] = False
+
+    await interaction.response.send_message(
+        "❌ Invalid amount.",
+        ephemeral=True
+    )
+    return
+                    order["processing"] = False
                     await interaction.response.send_message(
                         "❌ Invalid amount.",
                         ephemeral=True
@@ -185,8 +208,10 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                     TICKET_CATEGORY_NAME
                 )
 
-            ticket_name = supplier.name.lower().replace(" ", "-")
-
+            ticket_name = (
+    f"{supplier.name.lower().replace(' ', '-')}-"
+    f"{self.order_id[-4:]}"
+)
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
                     read_messages=False
