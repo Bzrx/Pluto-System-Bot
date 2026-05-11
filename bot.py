@@ -185,7 +185,10 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                     TICKET_CATEGORY_NAME
                 )
 
-            ticket_name = supplier.name.lower().replace(" ", "-")
+            ticket_name = (
+    f"{supplier.name.lower().replace(' ', '-')}-"
+    f"{self.order_id[-4:]}"
+)
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
@@ -221,36 +224,44 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
             order["last_supplier"] = supplier
             order["ticket_channel_id"] = channel.id
 
-            for msg in order.get("messages", []):
+            messages = order.get("messages", [])[:]
 
-                try:
+async def safe_edit(msg):
 
-                    if remaining_after <= 0:
+    try:
 
-                        await msg.edit(
-                            content=(
-                                f"❌ ORDER FILLED\n\n"
-                                f"Original Amount: "
-                                f"{order['original_amount']}\n"
-                                f"Rate: {order['rate']} PHP"
-                            ),
-                            view=None
-                        )
+        if remaining_after <= 0:
 
-                    else:
+            await msg.edit(
+                content=(
+                    f"❌ ORDER FILLED\n\n"
+                    f"Original Amount: "
+                    f"{order['original_amount']}\n"
+                    f"Rate: {order['rate']} PHP"
+                ),
+                view=None
+            )
 
-                        await msg.edit(
-                            content=(
-                                f"📢 **NEW ORDER**\n\n"
-                                f"💰 Remaining: "
-                                f"{format_amount(remaining_after)}\n"
-                                f"💵 Rate: {order['rate']} PHP"
-                            ),
-                            view=AcceptView(self.order_id)
-                        )
+        else:
 
-                except:
-                    pass
+            await msg.edit(
+                content=(
+                    f"📢 **NEW ORDER**\n\n"
+                    f"💰 Remaining: "
+                    f"{format_amount(remaining_after)}\n"
+                    f"💵 Rate: {order['rate']} PHP\n"
+                    f"📝 Description: "
+                    f"{order.get('description', 'None')}"
+                ),
+                view=AcceptView(self.order_id)
+            )
+
+    except:
+        pass
+
+await asyncio.gather(
+    *[safe_edit(msg) for msg in messages]
+)
 
             await channel.send(
                 f"🎫 **ORDER STARTED**\n\n"
@@ -385,7 +396,7 @@ class CashoutConfirmView(discord.ui.View):
 # ---------------- NEED ----------------
 
 @bot.command()
-async def need(ctx, amount: str, rate: str):
+async def need(ctx, amount: str, rate: str, *, description=None):
 
     buyer_role = discord.utils.get(
         ctx.guild.roles,
@@ -412,6 +423,9 @@ async def need(ctx, amount: str, rate: str):
         await ctx.send("❌ Invalid amount.")
         return
 
+    if not description:
+        description = "No description provided."
+
     order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
@@ -421,7 +435,8 @@ async def need(ctx, amount: str, rate: str):
         "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": [],
-        "exact": False
+        "exact": False,
+        "description": description
     }
 
     view = AcceptView(order_id)
@@ -438,7 +453,8 @@ async def need(ctx, amount: str, rate: str):
             msg = await member.send(
                 f"📢 **NEW ORDER**\n\n"
                 f"💰 Remaining: {amount}\n"
-                f"💵 Rate: {rate} PHP",
+                f"💵 Rate: {rate} PHP\n"
+                f"📝 Description: {description}",
                 view=view
             )
 
@@ -457,7 +473,7 @@ async def need(ctx, amount: str, rate: str):
 # ---------------- NEED EXACT ----------------
 
 @bot.command()
-async def needexact(ctx, amount: str, rate: str):
+async def needexact(ctx, amount: str, rate: str, *, description=None):
 
     buyer_role = discord.utils.get(
         ctx.guild.roles,
@@ -484,6 +500,9 @@ async def needexact(ctx, amount: str, rate: str):
         await ctx.send("❌ Invalid amount.")
         return
 
+    if not description:
+        description = "No description provided."
+
     order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
@@ -493,7 +512,8 @@ async def needexact(ctx, amount: str, rate: str):
         "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": [],
-        "exact": True
+        "exact": True,
+        "description": description
     }
 
     view = AcceptView(order_id)
@@ -510,21 +530,9 @@ async def needexact(ctx, amount: str, rate: str):
             msg = await member.send(
                 f"📢 **NEW EXACT ORDER**\n\n"
                 f"💰 Remaining: {amount}\n"
-                f"💵 Rate: {rate} PHP\n\n"
-                f"⚠️ Must be accepted fully.",
-                view=view
-            )
-
-            active_orders[order_id]["messages"].append(msg)
-
-            sent += 1
-
-        except:
-            pass
-
-    await ctx.send(
-        f"✅ Exact order sent to {sent} suppliers."
-    )
+                f"💵 Rate: {rate} PHP\n"
+                f"📝 Description: {description}\n\n"
+                f"⚠️
 
 
 # ---------------- WALLET ----------------
