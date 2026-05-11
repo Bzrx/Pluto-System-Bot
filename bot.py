@@ -141,34 +141,21 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
 
         async with lock:
 
-            if order.get("processing"):
-                await interaction.response.send_message(
-                    "❌ Someone is already accepting this order.",
-                    ephemeral=True
-                )
-                return
-
-            order["processing"] = True
             try:
                 sell_value = parse_amount(self.sell_amount.value)
 
             except:
-
-                order["processing"] = False
-
                 await interaction.response.send_message(
                     "❌ Invalid amount.",
                     ephemeral=True
                 )
                 return
+
             remaining = order["remaining"]
 
             if order.get("exact"):
 
                 if sell_value != remaining:
-
-                    order["processing"] = False
-
                     await interaction.response.send_message(
                         f"❌ You must accept exactly {format_amount(remaining)}",
                         ephemeral=True
@@ -178,15 +165,6 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
             else:
 
                 if sell_value <= 0 or sell_value > remaining:
-
-    order["processing"] = False
-
-    await interaction.response.send_message(
-        "❌ Invalid amount.",
-        ephemeral=True
-    )
-    return
-                    order["processing"] = False
                     await interaction.response.send_message(
                         "❌ Invalid amount.",
                         ephemeral=True
@@ -207,10 +185,8 @@ class AcceptModal(discord.ui.Modal, title="Accept Order"):
                     TICKET_CATEGORY_NAME
                 )
 
-            ticket_name = (
-    f"{supplier.name.lower().replace(' ', '-')}-"
-    f"{self.order_id[-4:]}"
-)
+            ticket_name = supplier.name.lower().replace(" ", "-")
+
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(
                     read_messages=False
@@ -409,7 +385,7 @@ class CashoutConfirmView(discord.ui.View):
 # ---------------- NEED ----------------
 
 @bot.command()
-async def need(ctx, amount: str, rate: str, *, description=None):
+async def need(ctx, amount: str, rate: str):
 
     buyer_role = discord.utils.get(
         ctx.guild.roles,
@@ -436,9 +412,6 @@ async def need(ctx, amount: str, rate: str, *, description=None):
         await ctx.send("❌ Invalid amount.")
         return
 
-    if not description:
-        description = "No description provided."
-
     order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
@@ -448,8 +421,7 @@ async def need(ctx, amount: str, rate: str, *, description=None):
         "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": [],
-        "exact": False,
-        "description": description
+        "exact": False
     }
 
     view = AcceptView(order_id)
@@ -466,8 +438,7 @@ async def need(ctx, amount: str, rate: str, *, description=None):
             msg = await member.send(
                 f"📢 **NEW ORDER**\n\n"
                 f"💰 Remaining: {amount}\n"
-                f"💵 Rate: {rate} PHP\n"
-                f"📝 Description: {description}",
+                f"💵 Rate: {rate} PHP",
                 view=view
             )
 
@@ -486,7 +457,7 @@ async def need(ctx, amount: str, rate: str, *, description=None):
 # ---------------- NEED EXACT ----------------
 
 @bot.command()
-async def needexact(ctx, amount: str, rate: str, *, description=None):
+async def needexact(ctx, amount: str, rate: str):
 
     buyer_role = discord.utils.get(
         ctx.guild.roles,
@@ -513,9 +484,6 @@ async def needexact(ctx, amount: str, rate: str, *, description=None):
         await ctx.send("❌ Invalid amount.")
         return
 
-    if not description:
-        description = "No description provided."
-
     order_id = str(ctx.message.id)
 
     active_orders[order_id] = {
@@ -525,8 +493,7 @@ async def needexact(ctx, amount: str, rate: str, *, description=None):
         "buyer": ctx.author,
         "guild": ctx.guild,
         "messages": [],
-        "exact": True,
-        "description": description
+        "exact": True
     }
 
     view = AcceptView(order_id)
@@ -543,8 +510,7 @@ async def needexact(ctx, amount: str, rate: str, *, description=None):
             msg = await member.send(
                 f"📢 **NEW EXACT ORDER**\n\n"
                 f"💰 Remaining: {amount}\n"
-                f"💵 Rate: {rate} PHP\n"
-                f"📝 Description: {description}\n\n"
+                f"💵 Rate: {rate} PHP\n\n"
                 f"⚠️ Must be accepted fully.",
                 view=view
             )
@@ -559,6 +525,7 @@ async def needexact(ctx, amount: str, rate: str, *, description=None):
     await ctx.send(
         f"✅ Exact order sent to {sent} suppliers."
     )
+
 
 # ---------------- WALLET ----------------
 
